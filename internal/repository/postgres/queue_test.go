@@ -8,21 +8,18 @@ import (
 	"context"
 	"testing"
 	"time"
-
-	"github.com/hireonai/backend-hireon-go/internal/domain"
 )
 
 func TestQueueEnqueueAndClaim(t *testing.T) {
-	store := testStore(t)
+	env := newTestEnv(t)
 	ctx := context.Background()
-	q := store.Queue()
-	userID := seededUserID(t)
+	q := env.queue()
+	userID := env.userID
 
 	id, err := q.Enqueue(ctx, userID, "cv_embedding")
 	if err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
-	t.Cleanup(func() { cleanupJob(t, id) })
 
 	job, err := q.Claim(ctx)
 	if err != nil {
@@ -42,16 +39,18 @@ func TestQueueEnqueueAndClaim(t *testing.T) {
 // A job that fails with attempts remaining returns to pending so the next worker
 // picks it up again.
 func TestQueueRetryableFailure(t *testing.T) {
-	store := testStore(t)
+	env := newTestEnv(t)
 	ctx := context.Background()
-	q := store.Queue()
-	userID := seededUserID(t)
+	q := env.queue()
+	userID := env.userID
 
 	id, err := q.Enqueue(ctx, userID, "cv_embedding")
 	if err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
-	t.Cleanup(func() { cleanupJob(t, id) })
+	if id == "" {
+		t.Fatal("enqueue returned an empty id")
+	}
 
 	job, err := q.Claim(ctx)
 	if err != nil || job == nil {
@@ -75,16 +74,15 @@ func TestQueueRetryableFailure(t *testing.T) {
 
 // Once attempts are exhausted the job stays failed and is never claimed again.
 func TestQueueExhaustsRetries(t *testing.T) {
-	store := testStore(t)
+	env := newTestEnv(t)
 	ctx := context.Background()
-	q := store.Queue()
-	userID := seededUserID(t)
+	q := env.queue()
+	userID := env.userID
 
 	id, err := q.Enqueue(ctx, userID, "cv_embedding")
 	if err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
-	t.Cleanup(func() { cleanupJob(t, id) })
 
 	job, _ := q.Claim(ctx)
 	if job == nil {
@@ -113,21 +111,20 @@ func TestQueueExhaustsRetries(t *testing.T) {
 
 // A job marked running by a process that then died is recovered.
 func TestQueueRecoversStaleRunning(t *testing.T) {
-	store := testStore(t)
+	env := newTestEnv(t)
 	ctx := context.Background()
-	q := store.Queue()
-	userID := seededUserID(t)
+	q := env.queue()
+	userID := env.userID
 
 	id, err := q.Enqueue(ctx, userID, "cv_embedding")
 	if err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
-	t.Cleanup(func() { cleanupJob(t, id) })
 
 	if _, err := q.Claim(ctx); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
-	simulateStale(t, id, 10*time.Minute)
+	env.simulateStale(t, id, 10*time.Minute)
 
 	n, err := q.RequeueStale(ctx, 5*time.Minute)
 	if err != nil {
@@ -147,16 +144,15 @@ func TestQueueRecoversStaleRunning(t *testing.T) {
 
 // Completing a job records its result.
 func TestQueueCompleteStoresResult(t *testing.T) {
-	store := testStore(t)
+	env := newTestEnv(t)
 	ctx := context.Background()
-	q := store.Queue()
-	userID := seededUserID(t)
+	q := env.queue()
+	userID := env.userID
 
 	id, err := q.Enqueue(ctx, userID, "cv_embedding")
 	if err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
-	t.Cleanup(func() { cleanupJob(t, id) })
 
 	job, _ := q.Claim(ctx)
 	if job == nil {
@@ -179,20 +175,17 @@ func TestQueueCompleteStoresResult(t *testing.T) {
 
 // Status for someone else's job is not disclosed.
 func TestQueueStatusScopedToOwner(t *testing.T) {
-	store := testStore(t)
+	env := newTestEnv(t)
 	ctx := context.Background()
-	q := store.Queue()
-	userID := seededUserID(t)
+	q := env.queue()
+	userID := env.userID
 
 	id, err := q.Enqueue(ctx, userID, "cv_embedding")
 	if err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
-	t.Cleanup(func() { cleanupJob(t, id) })
 
-	if _, err := q.QueueStatus(ctx, "000000000000000000000000", id); err == nil {
+	if _, err := q.QueueStatus(ctx, "someone-else", id); err == nil {
 		t.Fatal("another user's job status must not be readable")
 	}
 }
-
-var _ = domain.ErrNotFound

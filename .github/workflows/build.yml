@@ -58,12 +58,12 @@ jobs:
           PGPASSWORD: hireon
         run: psql -h localhost -U hireon -d hireon -f migrations/0001_init.sql
 
-      # The importer needs a dump of the live database. `dump/` is gitignored, so
-      # this step synthesizes one from the seed JSON to prove the schema and loader
-      # agree. A full end-to-end migration is exercised separately, by hand.
+      # Unit tests need no database.
       - name: Unit tests
         run: go test ./... -count=1
 
+      # Integration tests build their own schema and fixtures, so they run against
+      # a database that contains nothing but the DDL. No imported data required.
       - name: Integration tests
         env:
           TEST_DATABASE_URL: postgres://hireon:hireon@localhost:5432/hireon?sslmode=disable
