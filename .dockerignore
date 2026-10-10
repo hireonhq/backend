@@ -1,0 +1,13 @@
+# Keep the build context small and the layer cache stable.
+.git
+.github
+dump/
+testdata/
+tools/
+*.md
+.env
+.env.*
+!.env.example
+Makefile
+Dockerfile
+.dockerignore

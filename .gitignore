@@ -1,0 +1,19 @@
+# Local environment: contains real project URLs and dev credentials.
+.env
+.env.*
+!.env.example
+
+# Mongo dump used by cmd/import. Regenerated from the database; contains
+# production user emails, supabase ids and 4.9 MB of job data that does not
+# belong in the source repo.
+dump/
+
+# Golden fixtures are recorded from a live backend and can embed request data.
+testdata/golden/
+
+# Build output and local tooling.
+/api
+hireon-backend-go
+*.exe
+*.out
+coverage.txt
