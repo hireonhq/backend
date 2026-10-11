@@ -56,7 +56,7 @@ jobs:
       - name: Apply schema
         env:
           PGPASSWORD: hireon
-        run: psql -h localhost -U hireon -d hireon -f migrations/0001_init.sql
+        run: psql -h localhost -U hireon -d hireon -f migrations/0001_init.up.sql
 
       # Unit tests need no database.
       - name: Unit tests

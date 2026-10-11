@@ -13,17 +13,74 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/joho/godotenv"
 
 	"github.com/hireonai/backend-hireon-go/internal/auth"
 	"github.com/hireonai/backend-hireon-go/internal/config"
 	"github.com/hireonai/backend-hireon-go/internal/handler"
 	"github.com/hireonai/backend-hireon-go/internal/httpx"
+	"github.com/hireonai/backend-hireon-go/internal/migrate"
 	"github.com/hireonai/backend-hireon-go/internal/repository/postgres"
 	"github.com/hireonai/backend-hireon-go/internal/service"
 	"github.com/hireonai/backend-hireon-go/internal/storage"
 	"github.com/hireonai/backend-hireon-go/internal/worker"
 )
+
+// migrationsDir is where the SQL files live. The image ships them at
+// /app/migrations (see the Dockerfile), so the default resolves against WORKDIR.
+func migrationsDir() string {
+	if v := os.Getenv("MIGRATIONS_DIR"); v != "" {
+		return v
+	}
+	return migrate.Dir
+}
+
+// runMigrations applies pending migrations from the command line, then exits.
+func runMigrations(args []string) error {
+	_ = godotenv.Load()
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		return errors.New("DATABASE_URL is required")
+	}
+	dir := migrationsDir()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		return fmt.Errorf("connect: %w", err)
+	}
+	defer conn.Close(ctx)
+
+	if len(args) > 0 && args[0] == "status" {
+		return migrate.Report(ctx, conn, dir)
+	}
+	return migrate.Run(ctx, conn, dir)
+}
+
+// healthcheck probes this process's own /healthz endpoint. It exists so the
+// container healthcheck works in the distroless runtime image, which carries no
+// shell, curl or wget.
+func healthcheck() int {
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get("http://127.0.0.1:" + port + "/healthz")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "healthcheck failed:", err)
+		return 1
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		fmt.Fprintf(os.Stderr, "healthcheck returned %d\n", resp.StatusCode)
+		return 1
+	}
+	return 0
+}
 
 // Set at build time via -ldflags -X, so a running container can be identified.
 var (
@@ -32,6 +89,21 @@ var (
 )
 
 func main() {
+	// Subcommand and flags come first so they work in the distroless image, which
+	// has no shell and therefore cannot run a curl-based healthcheck.
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "-healthcheck", "--healthcheck":
+			os.Exit(healthcheck())
+		case "migrate":
+			if err := runMigrations(os.Args[2:]); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			return
+		}
+	}
+
 	_ = godotenv.Load()
 	cfg, err := config.Load()
 	if err != nil {
@@ -57,6 +129,21 @@ func run(cfg config.Config) error {
 	}
 	defer pool.Close()
 	slog.Info("database connected")
+
+	// Schema before traffic: a failed migration exits non-zero, so a container
+	// with an out-of-date schema never becomes healthy.
+	{
+		conn, err := pool.Acquire(ctx)
+		if err != nil {
+			return fmt.Errorf("acquire migration connection: %w", err)
+		}
+		err = migrate.Run(ctx, conn.Conn(), migrationsDir())
+		conn.Release()
+		if err != nil {
+			return fmt.Errorf("migrate: %w", err)
+		}
+	}
+	slog.Info("migrations applied")
 
 	verifier, err := auth.NewVerifier(ctx, cfg.SupabaseURL)
 	if err != nil {

@@ -54,6 +54,9 @@ LABEL org.opencontainers.image.title="hireon-backend" \
 
 WORKDIR /app
 COPY --from=build --chown=nonroot:nonroot /out/api /app/api
+# Migrations ship with the binary: the image tag and the schema version can never
+# drift apart, and the app applies them on startup.
+COPY --from=build --chown=nonroot:nonroot /src/migrations /app/migrations
 
 # Cloud Run injects PORT; 8080 is the local default.
 ENV PORT=8080
