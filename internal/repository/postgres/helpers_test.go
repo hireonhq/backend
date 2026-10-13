@@ -87,7 +87,7 @@ func newTestEnv(t *testing.T) *testEnv {
 		_, _ = pool.Exec(cleanupCtx, "DROP SCHEMA IF EXISTS "+schema+" CASCADE")
 	})
 
-	ddl, err := os.ReadFile("../../../migrations/0001_init.sql")
+	ddl, err := os.ReadFile("../../../migrations/0001_init.up.sql")
 	if err != nil {
 		t.Fatalf("read migrations: %v", err)
 	}

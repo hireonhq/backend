@@ -2,10 +2,10 @@ name: build
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
     tags: ["v*"]
   pull_request:
-    branches: [main]
+    branches: [main, dev]
   workflow_dispatch:
 
 # Build the image on GitHub's runners, publish to GHCR, and stop there.
